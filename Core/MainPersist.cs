@@ -59,8 +59,6 @@ namespace EngineStateManager
 
         private int _keepEngineOnVehicleHandle;
 
-        // Blocked-driver-door edge case: player can shuffle to passenger seat before exiting.
-        // If they were the driver very recently, keep the engine-on flag alive long enough to cover the exit.
         private int _recentDriverVehicleHandle;
         private int _recentDriverGameTime;
         private bool _recentDriverEngineWasOn;
@@ -124,7 +122,6 @@ namespace EngineStateManager
 
             if (inVehicle && currentVeh != null && currentVeh.Exists())
             {
-                // Track recent driver status (covers seat-shuffle exits when driver door is blocked).
                 if (currentVeh.Driver == player)
                 {
                     _recentDriverVehicleHandle = currentVeh.Handle;
@@ -133,8 +130,6 @@ namespace EngineStateManager
                 }
 
 
-                // If the driver door is blocked, GTA can shuffle the player to the passenger seat before the actual exit animation.
-                // Arm exit enforcement early in that shuffle window so the engine doesn't get killed at the final "step out" moment.
                 if (!BusForcesOff()
                     && currentVeh.Driver != player
                     && currentVeh.Handle == _recentDriverVehicleHandle
@@ -142,7 +137,6 @@ namespace EngineStateManager
                     && _recentDriverEngineWasOn
                     && !IsAircraft(currentVeh))
                 {
-                    // Shuffle+exit can exceed the normal exit window; extend enforcement for this edge case only.
                     int enforceMs = Math.Max(_exitEnforceMs, 4500);
                     ArmExit(currentVeh.Handle, source: "shuffle", enforceMsOverride: enforceMs);
                 }
@@ -241,19 +235,15 @@ namespace EngineStateManager
             if (currentVeh == null || !currentVeh.Exists())
                 return;
 
-            // Only for the player's driver seat exit intent.
             if (currentVeh.Driver != player)
                 return;
 
-            // Skip aircraft by design.
             if (IsAircraft(currentVeh))
                 return;
-
-            // Respect cooperative overrides (EngineStateControl / other mods).
+                
             if (BusForcesOff())
                 return;
 
-            // Exit intent: this fires at button-press time, before GTA may kill the engine during the exit animation.
             bool exitPressed =
                 Function.Call<bool>(Hash.IS_CONTROL_JUST_PRESSED, 0, (int)Control.VehicleExit) ||
                 Function.Call<bool>(Hash.IS_CONTROL_JUST_PRESSED, 2, (int)Control.VehicleExit) ||
@@ -266,7 +256,6 @@ namespace EngineStateManager
                 Function.Call<bool>(Hash.IS_DISABLED_CONTROL_PRESSED, 0, (int)Control.VehicleExit) ||
                 Function.Call<bool>(Hash.IS_DISABLED_CONTROL_PRESSED, 2, (int)Control.VehicleExit);
 
-            // With Interval=50ms, we can miss JUST_PRESSED; latch if the key is held and the get-out task has begun.
             if (!exitPressed && !(exitHeld && NativeCompat.IsPedGettingOutOfVehicle(player.Handle)))
                 return;
 
@@ -276,12 +265,10 @@ namespace EngineStateManager
 
             int vehHandle = currentVeh.Handle;
 
-            // Only protect exits where the engine was already running.
             bool engineOn = NativeCompat.IsVehicleEngineOn(vehHandle);
             if (!engineOn)
                 return;
 
-            // Blocked-driver-door can include a seat-shuffle + exit; extend the window for this path.
             int enforceMs = Math.Max(_exitEnforceMs, 6500);
             ArmExit(vehHandle, source: "exit_intent", enforceMsOverride: enforceMs);
         }
@@ -345,7 +332,6 @@ namespace EngineStateManager
             // LRU
             TouchPersistedVehicle(vehHandle);
             // Start immediately
-            // Respect cooperative overrides: if someone is forcing the engine OFF, do not fight it.
             var busIntent = EngineOverrideBus.GetCurrent(out _, out _, out _);
             if (busIntent == EngineIntent.ForceOff)
             {
@@ -365,7 +351,6 @@ namespace EngineStateManager
             if (!_exitArmed)
                 return;
 
-            // Respect explicit ForceOff intent from any script (including EngineStateControl / other mods).
             if (BusForcesOff())
             {
                 if (_exitVehicleHandle != 0 && NativeCompat.DoesEntityExist(_exitVehicleHandle))
@@ -433,15 +418,14 @@ namespace EngineStateManager
 
         private static void ForceEngineOnHard(int vehHandle)
         {
-            // Stronger than some wrappers: instantly turn engine on and allow autostart logic.
-            // (veh, on, instantly, disableAutoStart)
             try { Function.Call(Hash.SET_VEHICLE_UNDRIVEABLE, vehHandle, false); } catch { }
             try { Function.Call(Hash.SET_VEHICLE_ENGINE_ON, vehHandle, true, true, false); } catch { }
         }
 
+
         private void MaintainKeepEngineOnFlag(Ped player, Vehicle currentVeh)
         {
-            // Respect explicit ForceOff intent from any script (including EngineStateControl / other mods).
+
             if (BusForcesOff())
             {
                 ClearKeepEngineOnFlagIfAny();
@@ -454,9 +438,6 @@ namespace EngineStateManager
                 return;
             }
 
-            // Driver only (passengers shouldn't force this).
-            // Exception: if the player's driver door is blocked, the game can shuffle them to the passenger seat
-            // right before exiting. In that short window, treat them as "still the driver" so the engine doesn't auto-shut off.
             bool treatAsDriver =
                 (currentVeh.Driver == player) ||
                 (currentVeh.Handle == _recentDriverVehicleHandle && (Game.GameTime - _recentDriverGameTime) <= RecentDriverGraceMs);
@@ -476,15 +457,13 @@ namespace EngineStateManager
 
             int h = currentVeh.Handle;
 
-            // Respect cooperative overrides: if someone is forcing the engine OFF, do not keep engine-on flags alive.
             var busIntent = EngineOverrideBus.GetCurrent(out _, out _, out _);
             if (busIntent == EngineIntent.ForceOff)
             {
                 ClearKeepEngineOnFlagIfAny();
                 return;
             }
-
-            // Only bother if the engine is currently on, OR if we're in the seat-shuffle grace window and the engine was on very recently.
+            
             bool engineOnNow = NativeCompat.IsVehicleEngineOn(h);
             bool engineWasOnVeryRecently = (_lastVehicleHandle == h) && (Game.GameTime - _lastEngineOnGameTime) <= 1500;
 
@@ -510,12 +489,8 @@ namespace EngineStateManager
 
             _keepEngineOnVehicleHandle = h;
 
-            // Keep engine running on exit (when it was already running). Safe to apply while driving too.
             NativeCompat.SetVehicleKeepEngineOn(h, true);
 
-            // Blocked-driver-door shuffle edge case:
-            // If GTA kills the engine during the driver->passenger shuffle, restore it ONLY in the grace window,
-            // and only if it was running very recently, and no one is forcing it off via the override bus.
             if (!engineOnNow && inSeatShuffleGrace && engineWasOnVeryRecently)
             {
                 ForceEngineOnHard(h);
