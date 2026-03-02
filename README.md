@@ -21,6 +21,7 @@ Every feature is modular and fully configurable via INI.
 #### **-** Designed for future GTA updates
 #### **-** Disable aircraft stalling when the aircraft is flying too slow (if enabled)
 #### **-** Disable aircraft stalling if the aircraft is damaged. (if enabled)
+#### **-** Controller Support
 
 ### **[ Configuration Options ]**
 All features are configurable via: **EngineStateManager.ini**
@@ -42,9 +43,7 @@ invisible ped in the prop plane the player was last in to keep the engine idling
 ### **[ Planned Upcoming Features ]**
 #### **-** _Separate aircraft logic modes_
 #### **-** _Advanced idle RPM control_
-#### **-** _Expanded animation handling_
 #### **-** _Additional realism options_
-#### **-** _Controller Support_
 #### **-** _Configurable engine options that are only present in online_
 
 ### [ Development Notes ]
